@@ -140,6 +140,7 @@ func findOpenPort() int {
 
 var conn_adr = flag.String("connect", "", "address of a confsyncd instance to connect")
 var conf_filepath = flag.String("file", "config.json", "config file to sync")
+var rep_port = flag.Int("port", 0, "global rep socket port, default is random")
 
 func main() {
 	flag.Parse()
@@ -159,7 +160,12 @@ func main() {
 	global_sub_socket.SetSockOptString(zmq.SUBSCRIBE, "")
 	defer global_sub_socket.Close()
 
-	global_rep_port := strconv.Itoa(findOpenPort())
+	var global_rep_port string
+	if *rep_port == 0 {
+		global_rep_port = strconv.Itoa(findOpenPort())
+	} else {
+		global_rep_port = strconv.Itoa(*rep_port)
+	}
 	global_rep_socket := openSocket(ctx, zmq.REP, "tcp://*:"+global_rep_port)
 	defer global_rep_socket.Close()
 	log.Printf("Address: tcp://localhost:"+global_rep_port)
