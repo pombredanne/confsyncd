@@ -98,7 +98,7 @@ func watchSub(global_sub_socket, global_pub_socket, local_pub_socket zmq.Socket,
 	}
 }
 
-func watchRep(ctx zmq.Context, global_rep_socket, global_sub_socket zmq.Socket, clients []string, pub_address string) {
+func watchRep(ctx zmq.Context, global_rep_socket, global_sub_socket zmq.Socket, clients *[]string, pub_address string) {
 	for {
 		data, _ := global_rep_socket.Recv(0)
 		var req Request
@@ -106,10 +106,18 @@ func watchRep(ctx zmq.Context, global_rep_socket, global_sub_socket zmq.Socket, 
 		if req.Type == "connect" {
 			var creq ConnRequest
 			json.Unmarshal(data, &creq)
-			global_sub_socket.Connect(creq.PubAddress)
-			reply, _ := json.Marshal(ConnReply{pub_address, clients})
-			global_rep_socket.Send(reply, 0)
-			clients = append(clients, creq.RepAddress)
+			if !strSliceContains(*clients, creq.RepAddress) {
+				global_sub_socket.Connect(creq.PubAddress)
+				reply, _ := json.Marshal(ConnReply{pub_address, *clients})
+				global_rep_socket.Send(reply, 0)
+				for _, adr := range *clients {
+					req_socket := openSocket(ctx, zmq.REQ, adr)
+					req_socket.Send(data, 0)
+					req_socket.Close()
+				}
+				*clients = append(*clients, creq.RepAddress)
+				log.Printf("Connected: "+creq.RepAddress)
+			}
 		}
 		runtime.Gosched()
 	}
@@ -130,11 +138,14 @@ func openSocket(ctx zmq.Context, t zmq.SocketType, url string) zmq.Socket {
 func findOpenPort() int {
 	for i := 1024; i < 65536; i++ {
 		_, err := net.Dial("tcp", "localhost:"+strconv.Itoa(i))
-		if err != nil {
-			return i
-		}
+		if err != nil { return i }
 	}
 	return 5555 // will never return this unless you use up all the ports
+}
+
+func strSliceContains(sl []string, elem string) bool {
+	for _, v := range sl { if v == elem { return true } }
+	return false
 }
 // }}}
 
@@ -170,12 +181,11 @@ func main() {
 	defer global_rep_socket.Close()
 	log.Printf("Address: tcp://localhost:"+global_rep_port)
 
-	clients := make([]string, 0)
-
 	time.Sleep(1e9/2)
 	local_config := readConfig(filename)
 	publishConfig(local_config, global_pub_socket, local_pub_socket)
 
+	var clients []string
 	if *conn_adr != "" {
 		req_socket := openSocket(ctx, zmq.REQ, *conn_adr)
 		conn_req := ConnRequest{"connect", pub_address, "tcp://localhost:"+global_rep_port}
@@ -185,11 +195,14 @@ func main() {
 		var conn_reply ConnReply
 		json.Unmarshal(reply, &conn_reply)
 		global_sub_socket.Connect(conn_reply.PubAddress)
-		copy(clients, conn_reply.Clients)
+		clients = conn_reply.Clients
+		clients = append(clients, *conn_adr)
 		req_socket.Close()
+	} else {
+		clients = make([]string, 0)
 	}
 
-	go watchRep(ctx, global_rep_socket, global_sub_socket, clients, pub_address)
+	go watchRep(ctx, global_rep_socket, global_sub_socket, &clients, pub_address)
 	go watchSub(global_sub_socket, global_pub_socket, local_pub_socket, filename)
 	watchConfig(filename, global_pub_socket, local_pub_socket)
 }
