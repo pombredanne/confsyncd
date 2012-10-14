@@ -156,12 +156,13 @@ var rep_port = flag.Int("port", 0, "global rep socket port, default is random")
 func main() {
 	flag.Parse()
 	filename, _ := filepath.Abs(*conf_filepath)
+	hostname, _ := os.Hostname()
 	ctx, _ := zmq.NewContext()
 	defer ctx.Close()
 
 	global_pub_port := strconv.Itoa(findOpenPort())
 	global_pub_socket := openSocket(ctx, zmq.PUB, "tcp://*:"+global_pub_port)
-	pub_address := "tcp://localhost:"+global_pub_port // TODO: not just localhost
+	pub_address := "tcp://"+hostname+":"+global_pub_port
 	defer global_pub_socket.Close()
 
 	local_pub_socket  := openSocket(ctx, zmq.PUB, "ipc://confsyncd")
@@ -179,7 +180,7 @@ func main() {
 	}
 	global_rep_socket := openSocket(ctx, zmq.REP, "tcp://*:"+global_rep_port)
 	defer global_rep_socket.Close()
-	log.Printf("Address: tcp://localhost:"+global_rep_port)
+	log.Printf("Address: tcp://"+hostname+":"+global_rep_port)
 
 	time.Sleep(1e9/2)
 	local_config := readConfig(filename)
@@ -188,7 +189,7 @@ func main() {
 	var clients []string
 	if *conn_adr != "" {
 		req_socket := openSocket(ctx, zmq.REQ, *conn_adr)
-		conn_req := ConnRequest{"connect", pub_address, "tcp://localhost:"+global_rep_port}
+		conn_req := ConnRequest{"connect", pub_address, "tcp://"+hostname+":"+global_rep_port}
 		conn_req_json, _ := json.Marshal(conn_req)
 		req_socket.Send(conn_req_json, 0)
 		reply, _ := req_socket.Recv(0)
